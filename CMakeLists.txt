@@ -10,6 +10,7 @@ add_library(dragonfly
     src/protocol_codec.c
     src/transport.c
     src/commands.c
+    src/crc.c
 )
 
 target_include_directories(dragonfly PUBLIC
