@@ -7,10 +7,8 @@ set(CMAKE_C_STANDARD_REQUIRED ON)
 set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 
 add_library(dragonfly
-    src/protocol_codec.c
     src/transport.c
     src/commands.c
-    src/crc.c
 )
 
 target_include_directories(dragonfly PUBLIC
