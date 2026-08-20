@@ -16,8 +16,8 @@ target_include_directories(dragonfly PUBLIC
     ${CMAKE_CURRENT_SOURCE_DIR}/Dragonfly_Protocol
 )
 
-add_executable(dragonfly-cli
+add_executable(dragonfly_cli
     src/cli/main.c
 )
 
-target_link_libraries(dragonfly-cli PRIVATE dragonfly)
+target_link_libraries(dragonfly_cli PRIVATE dragonfly)
