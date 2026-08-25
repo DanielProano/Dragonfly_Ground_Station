@@ -9,6 +9,8 @@ set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 add_library(dragonfly
     src/transport.c
     src/commands.c
+    Dragonfly_Protocol/crc.c
+    Dragonfly_Protocol/protocol_codec.c
 )
 
 target_include_directories(dragonfly PUBLIC

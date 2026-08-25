@@ -27,16 +27,16 @@ static void print_error(const char *ctx, CMD_RESULT rc, int err)
 
     if (rc == CMD_ERR_NACKED) {
         switch (err) {
-            case ERR_CRC_FAIL:          fprintf(stderr, "CRC mismatch\n"); break;
-            case ERR_UNKNOWN_MSG:       fprintf(stderr, "unknown message\n"); break;
-            case ERR_WRONG_VERSION:     fprintf(stderr, "protocol version mismatch\n"); break;
-            case ERR_PAYLOAD_OVERSIZE:  fprintf(stderr, "payload oversize\n"); break;
-            case ERR_INVALID_STATE:     fprintf(stderr, "invalid state\n"); break;
-            case ERR_BUFFER_FULL:       fprintf(stderr, "buffer full\n"); break;
-            case ERR_AUTH_FAIL:         fprintf(stderr, "auth failed\n"); break;
-            case ERR_FLASH_FAIL:        fprintf(stderr, "flash failed\n"); break;
-            case ERR_SENSOR_FAIL:       fprintf(stderr, "sensor failed\n"); break;
-            case ERR_TIMEOUT:           fprintf(stderr, "protocol timeout\n"); break;
+            case PROTO_ERR_CRC_FAIL:          fprintf(stderr, "CRC mismatch\n"); break;
+            case PROTO_ERR_UNKNOWN_MSG:       fprintf(stderr, "unknown message\n"); break;
+            case PROTO_ERR_WRONG_VERSION:     fprintf(stderr, "protocol version mismatch\n"); break;
+            case PROTO_ERR_PAYLOAD_OVERSIZE:  fprintf(stderr, "payload oversize\n"); break;
+            case PROTO_ERR_INVALID_STATE:     fprintf(stderr, "invalid state\n"); break;
+            case PROTO_ERR_BUFFER_FULL:       fprintf(stderr, "buffer full\n"); break;
+            case PROTO_ERR_AUTH_FAIL:         fprintf(stderr, "auth failed\n"); break;
+            case PROTO_ERR_FLASH_FAIL:        fprintf(stderr, "flash failed\n"); break;
+            case PROTO_ERR_SENSOR_FAIL:       fprintf(stderr, "sensor failed\n"); break;
+            case PROTO_ERR_TIMEOUT:           fprintf(stderr, "protocol timeout\n"); break;
             default:                    fprintf(stderr, "protocol code %d\n", err); break;
         }
         return;

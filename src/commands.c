@@ -121,7 +121,7 @@ static CMD_RESULT recv_frame(
     }
 
     if (compute_crc16(crc_buf, crc_len) != received_crc) {
-        if (err_details) *err_details = ERR_CRC_FAIL;
+        if (err_details) *err_details = PROTO_ERR_CRC_FAIL;
         return CMD_ERR_TRANSPORT;
     }
 
@@ -184,7 +184,7 @@ static CMD_RESULT wait_for_message(
 
         if (msg_id == expected_message_id) {
             if (payload_len != out_payload_size) {
-                if (err_details) *err_details = ERR_PAYLOAD_OVERSIZE;
+                if (err_details) *err_details = PROTO_ERR_PAYLOAD_OVERSIZE;
                 return CMD_ERR_TRANSPORT;
             }
             memcpy(out_payload, payload, out_payload_size);
