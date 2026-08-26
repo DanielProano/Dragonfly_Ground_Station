@@ -4,6 +4,7 @@
 #include "protocol.h"
 #include "transport.h"
 
+#include <errno.h>
 #include <getopt.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -67,8 +68,171 @@ static void usage(const char *prog)
         "  watch                Stream all telemetry (Ctrl+C to stop)\n"
         "  bl-stats             Bootloader info\n"
         "  bl-erase             Erase application flash\n"
+        "  bl-update <file>     Upload firmware image\n"
         "  bl-verify            Verify application\n",
         prog);
+}
+
+/*
+ * Every command handler gets the args after the command name (argv[0] here
+ * is the first extra arg, not the program name) plus a slot for protocol/
+ * transport error details. Handlers do their own printing on success.
+ */
+typedef CMD_RESULT (*CmdHandler)(int argc, char **argv, int *err_details);
+
+static CMD_RESULT h_arm(int argc, char **argv, int *err) {
+    (void)argc; (void)argv;
+    return cmd_arm(err);
+}
+
+static CMD_RESULT h_disarm(int argc, char **argv, int *err) {
+    (void)argc; (void)argv;
+    return cmd_disarm(err);
+}
+
+static CMD_RESULT h_mode(int argc, char **argv, int *err) {
+    if (argc < 1) {
+        fprintf(stderr, "Error: mode requires an argument\n");
+        *err = TRANSPORT_ERR_INVALID_ARGS;
+        return CMD_ERR_TRANSPORT;
+    }
+    return cmd_set_flight_mode((FLIGHT_MODE)atoi(argv[0]), err);
+}
+
+static CMD_RESULT h_status(int argc, char **argv, int *err) {
+    (void)argc; (void)argv;
+    CMD_RESULT rc = cmd_wait_heartbeat(err);
+    if (rc == CMD_OK) printf("Heartbeat OK\n");
+    return rc;
+}
+
+static CMD_RESULT h_watch_imu(int argc, char **argv, int *err) {
+    (void)argc; (void)argv;
+    IMU imu;
+    return cmd_watch_imu(&imu, err);
+}
+
+static CMD_RESULT h_watch_gps(int argc, char **argv, int *err) {
+    (void)argc; (void)argv;
+    GPS gps;
+    return cmd_watch_gps(&gps, err);
+}
+
+static CMD_RESULT h_watch_baro(int argc, char **argv, int *err) {
+    (void)argc; (void)argv;
+    BAROMETER baro;
+    return cmd_watch_barometer(&baro, err);
+}
+
+static CMD_RESULT h_watch_power(int argc, char **argv, int *err) {
+    (void)argc; (void)argv;
+    POWER pwr;
+    return cmd_watch_power(&pwr, err);
+}
+
+static CMD_RESULT h_watch(int argc, char **argv, int *err) {
+    (void)argc; (void)argv;
+    return cmd_watch_overall(err);
+}
+
+static CMD_RESULT h_bl_stats(int argc, char **argv, int *err) {
+    (void)argc; (void)argv;
+    return cmd_bootloader_stats(err);
+}
+
+static CMD_RESULT h_bl_erase(int argc, char **argv, int *err) {
+    (void)argc; (void)argv;
+    return cmd_bootloader_erase_app(err);
+}
+
+static CMD_RESULT h_bl_verify(int argc, char **argv, int *err) {
+    (void)argc; (void)argv;
+    return cmd_bootloader_verify(err);
+}
+
+/* Reads a whole file into a malloc'd buffer. Prints its own error and
+ * returns NULL on failure. Caller owns the returned buffer. */
+static uint8_t *read_file(const char *path, long *out_size) {
+    FILE *fp = fopen(path, "rb");
+    if (!fp) {
+        fprintf(stderr, "Error: could not open '%s': %s\n", path, strerror(errno));
+        return NULL;
+    }
+
+    fseek(fp, 0, SEEK_END);
+    long size = ftell(fp);
+    if (size <= 0) {
+        fprintf(stderr, "Error: could not determine size of '%s'\n", path);
+        fclose(fp);
+        return NULL;
+    }
+    rewind(fp);
+
+    uint8_t *data = malloc((size_t)size);
+    if (!data) {
+        fprintf(stderr, "Error: out of memory reading '%s'\n", path);
+        fclose(fp);
+        return NULL;
+    }
+
+    if (fread(data, 1, (size_t)size, fp) != (size_t)size) {
+        fprintf(stderr, "Error: failed to read '%s'\n", path);
+        fclose(fp);
+        free(data);
+        return NULL;
+    }
+    fclose(fp);
+
+    *out_size = size;
+    return data;
+}
+
+static CMD_RESULT h_bl_update(int argc, char **argv, int *err) {
+    if (argc < 1) {
+        fprintf(stderr, "Error: bl-update requires a firmware file path\n");
+        *err = TRANSPORT_ERR_INVALID_ARGS;
+        return CMD_ERR_TRANSPORT;
+    }
+
+    long size = 0;
+    uint8_t *data = read_file(argv[0], &size);
+    if (!data) {
+        *err = TRANSPORT_ERR_INVALID_ARGS;
+        return CMD_ERR_TRANSPORT;
+    }
+
+    printf("Uploading %ld bytes from %s...\n", size, argv[0]);
+    CMD_RESULT rc = cmd_bootloader_update(data, (size_t)size, err);
+    free(data);
+    return rc;
+}
+
+static const struct {
+    const char *name;
+    CmdHandler handler;
+} COMMANDS[] = {
+    {"arm",         h_arm},
+    {"disarm",      h_disarm},
+    {"mode",        h_mode},
+    {"status",      h_status},
+    {"watch-imu",   h_watch_imu},
+    {"watch-gps",   h_watch_gps},
+    {"watch-baro",  h_watch_baro},
+    {"watch-power", h_watch_power},
+    {"watch",       h_watch},
+    {"bl-stats",    h_bl_stats},
+    {"bl-erase",    h_bl_erase},
+    {"bl-update",   h_bl_update},
+    {"bl-verify",   h_bl_verify},
+};
+
+static CmdHandler find_handler(const char *name) {
+    for (size_t i = 0; i < sizeof(COMMANDS) / sizeof(COMMANDS[0]); i++) {
+        if (strcmp(name, COMMANDS[i].name) == 0) {
+            return COMMANDS[i].handler;
+        }
+    }
+    return NULL;
 }
 
 int main(int argc, char **argv)
@@ -88,7 +252,7 @@ int main(int argc, char **argv)
             case 'h': host = optarg; break;
             case 'p': port = (uint16_t)atoi(optarg); break;
             default:  {
-                usage(argv[0]); 
+                usage(argv[0]);
                 fprintf(stderr, "Could not connect");
                 return 1;
             }
@@ -101,72 +265,24 @@ int main(int argc, char **argv)
         return 1;
     }
 
-    printf("Connecting to %s:%u...\n", host, port);
-
     const char *cmd = argv[optind];
-    int err = 0;
-    CMD_RESULT rc = cmd_init(host, port, &err);
-
-    if (rc != CMD_OK) {
-        print_error("Error while connecting", rc, err);
-        return 1;
-    }
-
-    if (strcmp(cmd, "arm") == 0) {
-        rc = cmd_arm(&err);
-    }
-    else if (strcmp(cmd, "disarm") == 0) {
-        rc = cmd_disarm(&err);
-    }
-    else if (strcmp(cmd, "mode") == 0) {
-        if (optind + 1 >= argc) {
-            fprintf(stderr, "Error: mode requires an argument\n");
-            return 1;
-        }
-        rc = cmd_set_flight_mode((FLIGHT_MODE)atoi(argv[optind + 1]), &err);
-    }
-    else if (strcmp(cmd, "status") == 0) {
-        rc = cmd_wait_heartbeat(&err);
-        if (rc == CMD_OK) printf("Heartbeat OK\n");
-    }
-    else if (strcmp(cmd, "watch-imu") == 0) {
-        IMU imu;
-        rc = cmd_watch_imu(&imu, &err);
-    }
-    else if (strcmp(cmd, "watch-gps") == 0) {
-        GPS gps;
-        rc = cmd_watch_gps(&gps, &err);
-    }
-    else if (strcmp(cmd, "watch-baro") == 0) {
-        BAROMETER baro;
-        rc = cmd_watch_barometer(&baro, &err);
-    }
-    else if (strcmp(cmd, "watch-power") == 0) {
-        POWER pwr;
-        rc = cmd_watch_power(&pwr, &err);
-    }
-    else if (strcmp(cmd, "watch") == 0) {
-        rc = cmd_watch_overall(&err);
-    }
-    else if (strcmp(cmd, "bl-stats") == 0) {
-        rc = cmd_bootloader_stats(&err);
-    }
-    else if (strcmp(cmd, "bl-erase") == 0) {
-        rc = cmd_bootloader_erase_app(&err);
-    }
-    else if (strcmp(cmd, "bl-verify") == 0) {
-        rc = cmd_bootloader_verify(&err);
-    }
-    else {
+    CmdHandler handler = find_handler(cmd);
+    if (!handler) {
         fprintf(stderr, "Unknown command: %s\n\n", cmd);
         usage(argv[0]);
         return 1;
     }
 
-    /* ------------------------------------------------------------------ */
-    /* Result                                                             */
-    /* ------------------------------------------------------------------ */
+    printf("Connecting to %s:%u...\n", host, port);
 
+    int err = 0;
+    CMD_RESULT rc = cmd_init(host, port, &err);
+    if (rc != CMD_OK) {
+        print_error("Error while connecting", rc, err);
+        return 1;
+    }
+
+    rc = handler(argc - optind - 1, argv + optind + 1, &err);
     if (rc != CMD_OK) {
         print_error(cmd, rc, err);
         return 1;
