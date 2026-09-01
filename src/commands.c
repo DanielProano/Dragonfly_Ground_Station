@@ -9,6 +9,9 @@
 #include <stdio.h>
 #include <string.h>
 
+#define WAIT_MAX_ATTEMPTS 5
+#define BOOTLOADER_CHUNK_MAX_RETRIES 3
+#define WIRE_BUF_MAX (5 + PAYLOAD_MAX_SIZE + 2)
 
 static TRANSPORT g_transport;
 static uint8_t g_next_sequence = 0;
@@ -19,18 +22,19 @@ static void handle_sigint(int signum) {
     g_watch_stop = 1;
 }
 
-#define WAIT_MAX_ATTEMPTS 5
-#define BOOTLOADER_CHUNK_MAX_RETRIES 3
-#define WIRE_BUF_MAX (5 + PAYLOAD_MAX_SIZE + 2)
-
 static CMD_RESULT send_frame(
     uint8_t message_id,
-    const void *payload,
-    uint8_t payload_len,
     uint8_t sequence,
+    uint8_t payload_len,
+    const void *payload,
     int *err_details
 ) {
     if (payload_len > PAYLOAD_MAX_SIZE) {
+        if (err_details) *err_details = TRANSPORT_ERR_INVALID_ARGS;
+        return CMD_ERR_TRANSPORT;
+    }
+
+    if (payload_len > 0 && payload == NULL) {
         if (err_details) *err_details = TRANSPORT_ERR_INVALID_ARGS;
         return CMD_ERR_TRANSPORT;
     }
@@ -190,7 +194,7 @@ static CMD_RESULT send_and_wait_ack(
 ) {
     uint8_t sequence = g_next_sequence++;
 
-    CMD_RESULT rc = send_frame(message_id, payload, payload_len, sequence, err_details);
+    CMD_RESULT rc = send_frame(message_id, sequence, payload_len, payload, err_details);
     if (rc != CMD_OK) {
         return rc;
     }
@@ -348,7 +352,7 @@ CMD_RESULT cmd_wait_power_telem(POWER *power, int *err_details) {
 CMD_RESULT cmd_esp32_status(ESP32_STATUS_PAYLOAD *status, int *err_details) {
     uint8_t sequence = g_next_sequence++;
 
-    CMD_RESULT rc = send_frame(MSG_ESP32_STATUS, NULL, 0, sequence, err_details);
+    CMD_RESULT rc = send_frame(MSG_ESP32_STATUS, sequence, 0, NULL, err_details);
     if (rc != CMD_OK) {
         return rc;
     }

@@ -10,35 +10,69 @@
 #include <stdlib.h>
 #include <string.h>
 
-static void print_error(const char *ctx, CMD_RESULT rc, int err)
+static void print_error(const char *context, CMD_RESULT rc, int err)
 {
-    fprintf(stderr, "%s failed: ", ctx);
+    fprintf(stderr, "%s failed: ", context);
 
     if (rc == CMD_ERR_TRANSPORT) {
         switch (err) {
-            case TRANSPORT_ERR_INVALID_ARGS:  fprintf(stderr, "invalid args\n"); break;
-            case TRANSPORT_ERR_CONNECT:       fprintf(stderr, "connection failed\n"); break;
-            case TRANSPORT_ERR_SOCKET:        fprintf(stderr, "socket error\n"); break;
-            case TRANSPORT_ERR_TIMEOUT:       fprintf(stderr, "timeout\n"); break;
-            case TRANSPORT_ERR_CLOSED:        fprintf(stderr, "connection closed\n"); break;
-            default:                          fprintf(stderr, "transport code %d\n", err); break;
+            case TRANSPORT_ERR_INVALID_ARGS:  
+                fprintf(stderr, "invalid args\n"); 
+                break;
+            case TRANSPORT_ERR_CONNECT:       
+                fprintf(stderr, "connection failed\n"); 
+                break;
+            case TRANSPORT_ERR_SOCKET:        
+                fprintf(stderr, "socket error\n"); 
+                break;
+            case TRANSPORT_ERR_TIMEOUT:       
+                fprintf(stderr, "timeout\n"); 
+                break;
+            case TRANSPORT_ERR_CLOSED:        
+                fprintf(stderr, "connection closed\n"); 
+                break;
+            default:                          
+                fprintf(stderr, "transport code %d\n", err); 
+                break;
         }
         return;
     }
 
     if (rc == CMD_ERR_NACKED) {
         switch (err) {
-            case PROTO_ERR_CRC_FAIL:          fprintf(stderr, "CRC mismatch\n"); break;
-            case PROTO_ERR_UNKNOWN_MSG:       fprintf(stderr, "unknown message\n"); break;
-            case PROTO_ERR_WRONG_VERSION:     fprintf(stderr, "protocol version mismatch\n"); break;
-            case PROTO_ERR_PAYLOAD_OVERSIZE:  fprintf(stderr, "payload oversize\n"); break;
-            case PROTO_ERR_INVALID_STATE:     fprintf(stderr, "invalid state\n"); break;
-            case PROTO_ERR_BUFFER_FULL:       fprintf(stderr, "buffer full\n"); break;
-            case PROTO_ERR_AUTH_FAIL:         fprintf(stderr, "auth failed\n"); break;
-            case PROTO_ERR_FLASH_FAIL:        fprintf(stderr, "flash failed\n"); break;
-            case PROTO_ERR_SENSOR_FAIL:       fprintf(stderr, "sensor failed\n"); break;
-            case PROTO_ERR_TIMEOUT:           fprintf(stderr, "protocol timeout\n"); break;
-            default:                    fprintf(stderr, "protocol code %d\n", err); break;
+            case PROTO_ERR_CRC_FAIL:          
+                fprintf(stderr, "CRC mismatch\n"); 
+                break;
+            case PROTO_ERR_UNKNOWN_MSG:       
+                fprintf(stderr, "unknown message\n"); 
+                break;
+            case PROTO_ERR_WRONG_VERSION:     
+                fprintf(stderr, "protocol version mismatch\n"); 
+                break;
+            case PROTO_ERR_PAYLOAD_OVERSIZE:  
+                fprintf(stderr, "payload oversize\n"); 
+                break;
+            case PROTO_ERR_INVALID_STATE:     
+                fprintf(stderr, "invalid state\n"); 
+                break;
+            case PROTO_ERR_BUFFER_FULL:       
+                fprintf(stderr, "buffer full\n"); 
+                break;
+            case PROTO_ERR_AUTH_FAIL:         
+                fprintf(stderr, "auth failed\n"); 
+                break;
+            case PROTO_ERR_FLASH_FAIL:        
+                fprintf(stderr, "flash failed\n"); 
+                break;
+            case PROTO_ERR_SENSOR_FAIL:       
+                fprintf(stderr, "sensor failed\n"); 
+                break;
+            case PROTO_ERR_TIMEOUT:           
+                fprintf(stderr, "protocol timeout\n"); 
+                break;
+            default:                    
+                fprintf(stderr, "protocol code %d\n", err); 
+                break;
         }
         return;
     }
@@ -71,6 +105,8 @@ static void usage(const char *prog)
         "  bl-erase             Erase application flash\n"
         "  bl-update <file>     Upload firmware image\n"
         "  bl-verify            Verify application\n",
+        "  oled-print <message> Set textual output on oled\n",
+        "  oled-clear           Clear oled\n",
         prog);
 }
 
