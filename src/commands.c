@@ -2,6 +2,7 @@
 
 #include "commands.h"
 #include "crc.h"
+#include "protocol_codec.h"
 #include "transport.h"
 
 #include <signal.h>
@@ -34,25 +35,26 @@ static CMD_RESULT send_frame(
         return CMD_ERR_TRANSPORT;
     }
 
-    uint8_t buf[WIRE_BUF_MAX];
-    size_t offset = 0;
-
-    buf[offset++] = PROTOCOL_START_BYTE;
-    buf[offset++] = PROTOCOL_VERSION;
-    buf[offset++] = message_id;
-    buf[offset++] = sequence;
-    buf[offset++] = payload_len;
+    FRAME frame = {
+        .start_byte  = PROTOCOL_START_BYTE,
+        .version     = PROTOCOL_VERSION,
+        .message_id  = message_id,
+        .sequence    = sequence,
+        .payload_len = payload_len,
+    };
 
     if (payload_len > 0 && payload != NULL) {
-        memcpy(buf + offset, payload, payload_len);
+        memcpy(frame.payload, payload, payload_len);
     }
-    offset += payload_len;
 
-    uint16_t crc = compute_crc16(buf, offset);
-    buf[offset++] = (uint8_t)(crc >> 8);
-    buf[offset++] = (uint8_t)(crc & 0xFF);
+    uint8_t buf[WIRE_BUF_MAX];
+    int encoded_len = protocol_frame_encode(buf, sizeof(buf), &frame);
+    if (encoded_len < 0) {
+        if (err_details) *err_details = TRANSPORT_ERR_INVALID_ARGS;
+        return CMD_ERR_TRANSPORT;
+    }
 
-    int rc = transport_send(&g_transport, buf, offset);
+    int rc = transport_send(&g_transport, buf, (size_t)encoded_len);
     if (rc != TRANSPORT_OK) {
         if (err_details) *err_details = rc;
         return CMD_ERR_TRANSPORT;
@@ -68,68 +70,43 @@ static CMD_RESULT recv_frame(
     uint8_t *out_payload_len,
     int *err_details
 ) {
-    uint8_t header[5];
-    int rc = transport_recv_exact(&g_transport, header, sizeof(header));
+    uint8_t buf[WIRE_BUF_MAX];
+
+    int rc = transport_recv_exact(&g_transport, buf, 5);
     if (rc != TRANSPORT_OK) {
         if (err_details) *err_details = rc;
         return (rc == TRANSPORT_ERR_TIMEOUT) ? CMD_ERR_NO_RESPONSE : CMD_ERR_TRANSPORT;
     }
 
-    uint8_t start_byte  = header[0];
-    uint8_t version     = header[1];
-    uint8_t message_id  = header[2];
-    uint8_t sequence    = header[3];
-    uint8_t payload_len = header[4];
-
-    if (start_byte != PROTOCOL_START_BYTE || version != PROTOCOL_VERSION) {
-        if (err_details) *err_details = TRANSPORT_ERR_SOCKET;
-        return CMD_ERR_TRANSPORT;
-    }
-
+    uint8_t payload_len = buf[4];
     if (payload_len > PAYLOAD_MAX_SIZE) {
         if (err_details) *err_details = TRANSPORT_ERR_SOCKET;
         return CMD_ERR_TRANSPORT;
     }
 
-    uint8_t payload[PAYLOAD_MAX_SIZE];
-    if (payload_len > 0) {
-        rc = transport_recv_exact(&g_transport, payload, payload_len);
-        if (rc != TRANSPORT_OK) {
-            if (err_details) *err_details = rc;
-            return (rc == TRANSPORT_ERR_TIMEOUT) ? CMD_ERR_NO_RESPONSE : CMD_ERR_TRANSPORT;
-        }
-    }
-
-    uint8_t crc_bytes[2];
-    rc = transport_recv_exact(&g_transport, crc_bytes, sizeof(crc_bytes));
+    size_t remaining = (size_t)payload_len + sizeof(uint16_t);
+    rc = transport_recv_exact(&g_transport, buf + 5, remaining);
     if (rc != TRANSPORT_OK) {
         if (err_details) *err_details = rc;
         return (rc == TRANSPORT_ERR_TIMEOUT) ? CMD_ERR_NO_RESPONSE : CMD_ERR_TRANSPORT;
     }
-    uint16_t received_crc = ((uint16_t)crc_bytes[0] << 8) | crc_bytes[1];
 
-    uint8_t crc_buf[WIRE_BUF_MAX];
-    size_t crc_len = 0;
-    crc_buf[crc_len++] = start_byte;
-    crc_buf[crc_len++] = version;
-    crc_buf[crc_len++] = message_id;
-    crc_buf[crc_len++] = sequence;
-    crc_buf[crc_len++] = payload_len;
-    if (payload_len > 0) {
-        memcpy(crc_buf + crc_len, payload, payload_len);
-        crc_len += payload_len;
-    }
-
-    if (compute_crc16(crc_buf, crc_len) != received_crc) {
+    FRAME frame;
+    if (protocol_frame_decode(&frame, buf, 5 + remaining) < 0) {
         if (err_details) *err_details = PROTO_ERR_CRC_FAIL;
         return CMD_ERR_TRANSPORT;
     }
 
-    *out_message_id = message_id;
-    *out_sequence = sequence;
-    *out_payload_len = payload_len;
-    if (payload_len > 0) {
-        memcpy(out_payload, payload, payload_len);
+    if (frame.version != PROTOCOL_VERSION) {
+        if (err_details) *err_details = TRANSPORT_ERR_SOCKET;
+        return CMD_ERR_TRANSPORT;
+    }
+
+    *out_message_id = frame.message_id;
+    *out_sequence = frame.sequence;
+    *out_payload_len = frame.payload_len;
+    if (frame.payload_len > 0) {
+        memcpy(out_payload, frame.payload, frame.payload_len);
     }
 
     return CMD_OK;
