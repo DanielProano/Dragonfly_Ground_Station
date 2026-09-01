@@ -61,6 +61,7 @@ static void usage(const char *prog)
         "  mode <n>             Set flight mode:\n"
         "                         0=manual 1=acro 2=auto 3=wp 4=mission 5=rtl 6=land\n"
         "  status               Request heartbeat\n"
+        "  esp32-status         Request ESP32 bridge status\n"
         "  watch-imu            Stream IMU telemetry (Ctrl+C to stop)\n"
         "  watch-gps            Stream GPS telemetry (Ctrl+C to stop)\n"
         "  watch-baro           Stream barometer telemetry (Ctrl+C to stop)\n"
@@ -103,6 +104,20 @@ static CMD_RESULT h_status(int argc, char **argv, int *err) {
     (void)argc; (void)argv;
     CMD_RESULT rc = cmd_wait_heartbeat(err);
     if (rc == CMD_OK) printf("Heartbeat OK\n");
+    return rc;
+}
+
+static CMD_RESULT h_esp32_status(int argc, char **argv, int *err) {
+    (void)argc; (void)argv;
+    ESP32_STATUS_PAYLOAD status;
+    CMD_RESULT rc = cmd_esp32_status(&status, err);
+    if (rc == CMD_OK) {
+        printf("[ESP32] uptime=%u ms  free_heap=%u bytes  wifi_clients=%u\n",
+               status.uptime_ms, status.free_heap_bytes, status.wifi_client_count);
+        printf("[ESP32] stm32_link=%s  last_frame_age=%u ms  frames_ok=%u  frames_err=%u\n",
+               status.stm32_link_up ? "UP" : "DOWN",
+               status.stm32_last_frame_age_ms, status.stm32_frames_ok, status.stm32_frames_err);
+    }
     return rc;
 }
 
@@ -215,6 +230,7 @@ static const struct {
     {"disarm",      h_disarm},
     {"mode",        h_mode},
     {"status",      h_status},
+    {"esp32-status", h_esp32_status},
     {"watch-imu",   h_watch_imu},
     {"watch-gps",   h_watch_gps},
     {"watch-baro",  h_watch_baro},

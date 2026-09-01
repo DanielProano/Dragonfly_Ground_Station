@@ -368,6 +368,36 @@ CMD_RESULT cmd_wait_power_telem(POWER *power, int *err_details) {
     return rc;
 }
 
+CMD_RESULT cmd_esp32_status(ESP32_STATUS_PAYLOAD *status, int *err_details) {
+    uint8_t sequence = g_next_sequence++;
+
+    CMD_RESULT rc = send_frame(MSG_ESP32_STATUS, NULL, 0, sequence, err_details);
+    if (rc != CMD_OK) {
+        return rc;
+    }
+
+    for (int attempt = 0; attempt < WAIT_MAX_ATTEMPTS; attempt++) {
+        uint8_t msg_id, seq, payload_len;
+        uint8_t payload[PAYLOAD_MAX_SIZE];
+
+        rc = recv_frame(&msg_id, &seq, payload, &payload_len, err_details);
+        if (rc == CMD_ERR_TRANSPORT) return rc;
+        if (rc == CMD_ERR_NO_RESPONSE) continue;
+
+        if (msg_id == MSG_ESP32_STATUS && seq == sequence) {
+            if (payload_len != sizeof(*status)) {
+                if (err_details) *err_details = PROTO_ERR_PAYLOAD_OVERSIZE;
+                return CMD_ERR_TRANSPORT;
+            }
+            memcpy(status, payload, sizeof(*status));
+            return CMD_OK;
+        }
+    }
+
+    if (err_details) *err_details = TRANSPORT_ERR_TIMEOUT;
+    return CMD_ERR_NO_RESPONSE;
+}
+
 CMD_RESULT cmd_watch_imu(IMU *imu, int *err_details) {
     g_watch_stop = 0;
     while (!g_watch_stop) {
