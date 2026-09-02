@@ -1,3 +1,5 @@
+#include "protocol.h"
+#include <stddef.h>
 #define _POSIX_C_SOURCE 200809L
 
 #include "commands.h"
@@ -377,6 +379,30 @@ CMD_RESULT cmd_esp32_status(ESP32_STATUS_PAYLOAD *status, int *err_details) {
 
     if (err_details) *err_details = TRANSPORT_ERR_TIMEOUT;
     return CMD_ERR_NO_RESPONSE;
+}
+
+CMD_RESULT cmd_esp32_oled_print(char *msg, size_t msg_len, int *err_details) {
+    OLED_PAYLOAD payload;
+    memset(&payload, 0, sizeof(payload));
+    payload.cmd = OLED_PRINT;
+
+    size_t copy_len = msg_len;
+    if (copy_len > sizeof(payload.text) - 1) {
+        copy_len = sizeof(payload.text) - 1;
+    }
+    memcpy(payload.text, msg, copy_len);
+
+    uint8_t sequence = g_next_sequence++;
+    return send_frame(MSG_OLED, sequence, sizeof(payload), &payload, err_details);
+}
+
+CMD_RESULT cmd_esp32_oled_clear(int *err_details) {
+    OLED_PAYLOAD payload;
+    memset(&payload, 0, sizeof(payload));
+    payload.cmd = OLED_CLEAR;
+
+    uint8_t sequence = g_next_sequence++;
+    return send_frame(MSG_OLED, sequence, sizeof(payload), &payload, err_details);
 }
 
 CMD_RESULT cmd_watch_imu(IMU *imu, int *err_details) {

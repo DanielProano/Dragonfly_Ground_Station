@@ -26,6 +26,8 @@ CMD_RESULT cmd_wait_gps_telem(GPS *gps, int *err_details);
 CMD_RESULT cmd_wait_barometer_telem(BAROMETER *barometer, int *err_details);
 CMD_RESULT cmd_wait_power_telem(POWER *power, int *err_details);
 CMD_RESULT cmd_esp32_status(ESP32_STATUS_PAYLOAD *status, int *err_details);
+CMD_RESULT cmd_esp32_oled_print(char *msg, size_t msg_len, int *err_details);
+CMD_RESULT cmd_esp32_oled_clear(int *err_details);
 
 CMD_RESULT cmd_watch_imu(IMU *imu, int *err_details);
 CMD_RESULT cmd_watch_gps(GPS *gps, int *err_details);

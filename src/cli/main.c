@@ -104,8 +104,8 @@ static void usage(const char *prog)
         "  bl-stats             Bootloader info\n"
         "  bl-erase             Erase application flash\n"
         "  bl-update <file>     Upload firmware image\n"
-        "  bl-verify            Verify application\n",
-        "  oled-print <message> Set textual output on oled\n",
+        "  bl-verify            Verify application\n"
+        "  oled-print <message> Set textual output on oled\n"
         "  oled-clear           Clear oled\n",
         prog);
 }
@@ -258,6 +258,21 @@ static CMD_RESULT h_bl_update(int argc, char **argv, int *err) {
     return rc;
 }
 
+static CMD_RESULT h_oled_print(int argc, char **argv, int *err) {
+    if (argc < 1) {
+        fprintf(stderr, "Error: oled-print requires a message argument\n");
+        *err = TRANSPORT_ERR_INVALID_ARGS;
+        return CMD_ERR_TRANSPORT;
+    }
+    return cmd_esp32_oled_print(argv[0], strlen(argv[0]), err);
+};
+
+static CMD_RESULT h_oled_clear(int argc, char **argv, int *err) {
+    (void) argc;
+    (void) argv;
+    return cmd_esp32_oled_clear(err);
+};
+
 static const struct {
     const char *name;
     CmdHandler handler;
@@ -276,6 +291,8 @@ static const struct {
     {"bl-erase",    h_bl_erase},
     {"bl-update",   h_bl_update},
     {"bl-verify",   h_bl_verify},
+    {"oled-print",  h_oled_print},
+    {"oled-clear",  h_oled_clear},
 };
 
 static CmdHandler find_handler(const char *name) {
