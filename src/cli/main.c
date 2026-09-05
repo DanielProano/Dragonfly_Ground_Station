@@ -1,5 +1,3 @@
-#define _POSIX_C_SOURCE 200809L
-
 #include "commands.h"
 #include "protocol.h"
 #include "transport.h"
@@ -40,34 +38,34 @@ static void print_error(const char *context, CMD_RESULT rc, int err)
 
     if (rc == CMD_ERR_NACKED) {
         switch (err) {
-            case PROTO_ERR_CRC_FAIL:          
+            case ERROR_CRC_FAIL:          
                 fprintf(stderr, "CRC mismatch\n"); 
                 break;
-            case PROTO_ERR_UNKNOWN_MSG:       
+            case ERROR_UNKNOWN_MSG:       
                 fprintf(stderr, "unknown message\n"); 
                 break;
-            case PROTO_ERR_WRONG_VERSION:     
+            case ERROR_WRONG_VERSION:     
                 fprintf(stderr, "protocol version mismatch\n"); 
                 break;
-            case PROTO_ERR_PAYLOAD_OVERSIZE:  
+            case ERROR_PAYLOAD_OVERSIZE:  
                 fprintf(stderr, "payload oversize\n"); 
                 break;
-            case PROTO_ERR_INVALID_STATE:     
+            case ERROR_INVALID_STATE:     
                 fprintf(stderr, "invalid state\n"); 
                 break;
-            case PROTO_ERR_BUFFER_FULL:       
+            case ERROR_BUFFER_FULL:       
                 fprintf(stderr, "buffer full\n"); 
                 break;
-            case PROTO_ERR_AUTH_FAIL:         
+            case ERROR_AUTH_FAIL:         
                 fprintf(stderr, "auth failed\n"); 
                 break;
-            case PROTO_ERR_FLASH_FAIL:        
+            case ERROR_FLASH_FAIL:        
                 fprintf(stderr, "flash failed\n"); 
                 break;
-            case PROTO_ERR_SENSOR_FAIL:       
+            case ERROR_SENSOR_FAIL:       
                 fprintf(stderr, "sensor failed\n"); 
                 break;
-            case PROTO_ERR_TIMEOUT:           
+            case ERROR_TIMEOUT:           
                 fprintf(stderr, "protocol timeout\n"); 
                 break;
             default:                    
@@ -97,7 +95,6 @@ static void usage(const char *prog)
         "  status               Request heartbeat\n"
         "  esp32-status         Request ESP32 bridge status\n"
         "  watch-imu            Stream IMU telemetry (Ctrl+C to stop)\n"
-        "  watch-gps            Stream GPS telemetry (Ctrl+C to stop)\n"
         "  watch-baro           Stream barometer telemetry (Ctrl+C to stop)\n"
         "  watch-power          Stream power telemetry (Ctrl+C to stop)\n"
         "  watch                Stream all telemetry (Ctrl+C to stop)\n"
@@ -138,8 +135,12 @@ static CMD_RESULT h_mode(int argc, char **argv, int *err) {
 
 static CMD_RESULT h_status(int argc, char **argv, int *err) {
     (void)argc; (void)argv;
-    CMD_RESULT rc = cmd_wait_heartbeat(err);
-    if (rc == CMD_OK) printf("Heartbeat OK\n");
+    HEARTBEAT_PAYLOAD hb;
+    CMD_RESULT rc = cmd_wait_heartbeat(&hb, err);
+    if (rc == CMD_OK) {
+        printf("Heartbeat OK: state=%u mode=%u flags=0x%04x\n",
+               hb.state, hb.mode, hb.error_flags);
+    }
     return rc;
 }
 
@@ -163,12 +164,6 @@ static CMD_RESULT h_watch_imu(int argc, char **argv, int *err) {
     return cmd_watch_imu(&imu, err);
 }
 
-static CMD_RESULT h_watch_gps(int argc, char **argv, int *err) {
-    (void)argc; (void)argv;
-    GPS gps;
-    return cmd_watch_gps(&gps, err);
-}
-
 static CMD_RESULT h_watch_baro(int argc, char **argv, int *err) {
     (void)argc; (void)argv;
     BAROMETER baro;
@@ -188,7 +183,8 @@ static CMD_RESULT h_watch(int argc, char **argv, int *err) {
 
 static CMD_RESULT h_bl_stats(int argc, char **argv, int *err) {
     (void)argc; (void)argv;
-    return cmd_bootloader_stats(err);
+    BOOTLOADER_STATS_PAYLOAD stats;
+    return cmd_bootloader_stats(&stats, err);
 }
 
 static CMD_RESULT h_bl_erase(int argc, char **argv, int *err) {
@@ -283,7 +279,6 @@ static const struct {
     {"status",      h_status},
     {"esp32-status", h_esp32_status},
     {"watch-imu",   h_watch_imu},
-    {"watch-gps",   h_watch_gps},
     {"watch-baro",  h_watch_baro},
     {"watch-power", h_watch_power},
     {"watch",       h_watch},

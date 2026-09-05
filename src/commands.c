@@ -1,6 +1,5 @@
 #include "protocol.h"
 #include <stddef.h>
-#define _POSIX_C_SOURCE 200809L
 
 #include "commands.h"
 #include "crc.h"
@@ -99,7 +98,7 @@ static CMD_RESULT recv_frame(
 
     FRAME frame;
     if (protocol_frame_decode(&frame, buf, 5 + remaining) < 0) {
-        if (err_details) *err_details = PROTO_ERR_CRC_FAIL;
+        if (err_details) *err_details = ERROR_CRC_FAIL;
         return CMD_ERR_TRANSPORT;
     }
 
@@ -125,7 +124,7 @@ static CMD_RESULT wait_for_ack(uint8_t sequence, int *err_details) {
 
         CMD_RESULT rc = recv_frame(&msg_id, &seq, payload, &payload_len, err_details);
         if (rc == CMD_ERR_TRANSPORT) return rc;
-        if (rc == CMD_ERR_NO_RESPONSE) continue; /* one recv timed out, try again */
+        if (rc == CMD_ERR_NO_RESPONSE) continue;
 
         if (msg_id == MSG_ACK) {
             ACK_PAYLOAD ack;
@@ -151,8 +150,10 @@ static CMD_RESULT wait_for_ack(uint8_t sequence, int *err_details) {
     return CMD_ERR_NO_RESPONSE;
 }
 
+/* expected_sequence < 0 means "don't care which sequence it's tagged with" */
 static CMD_RESULT wait_for_message(
     uint8_t expected_message_id,
+    int expected_sequence,
     void *out_payload,
     size_t out_payload_size,
     int *err_details
@@ -165,9 +166,10 @@ static CMD_RESULT wait_for_message(
         if (rc == CMD_ERR_TRANSPORT) return rc;
         if (rc == CMD_ERR_NO_RESPONSE) continue;
 
-        if (msg_id == expected_message_id) {
+        if (msg_id == expected_message_id &&
+            (expected_sequence < 0 || seq == (uint8_t)expected_sequence)) {
             if (payload_len != out_payload_size) {
-                if (err_details) *err_details = PROTO_ERR_PAYLOAD_OVERSIZE;
+                if (err_details) *err_details = ERROR_PAYLOAD_OVERSIZE;
                 return CMD_ERR_TRANSPORT;
             }
             memcpy(out_payload, payload, out_payload_size);
@@ -204,6 +206,25 @@ static CMD_RESULT send_and_wait_ack(
     return wait_for_ack(sequence, err_details);
 }
 
+static CMD_RESULT send_and_wait_message(
+    uint8_t message_id,
+    const void *payload,
+    uint8_t payload_len,
+    uint8_t expected_response_id,
+    void *out_payload,
+    size_t out_payload_size,
+    int *err_details
+) {
+    uint8_t sequence = g_next_sequence++;
+
+    CMD_RESULT rc = send_frame(message_id, sequence, payload_len, payload, err_details);
+    if (rc != CMD_OK) {
+        return rc;
+    }
+
+    return wait_for_message(expected_response_id, sequence, out_payload, out_payload_size, err_details);
+}
+
 CMD_RESULT cmd_init(const char *host, uint16_t port, int *err_details) {
     compute_crc16_table();
 
@@ -224,16 +245,22 @@ CMD_RESULT cmd_init(const char *host, uint16_t port, int *err_details) {
     return CMD_OK;
 }
 
-CMD_RESULT cmd_wait_heartbeat(int *err_details) {
-    HEARTBEAT_PAYLOAD hb;
-    return wait_for_message(MSG_HEARTBEAT, &hb, sizeof(hb), err_details);
+CMD_RESULT cmd_wait_heartbeat(HEARTBEAT_PAYLOAD *hb, int *err_details) {
+    return wait_for_message(MSG_HEARTBEAT, -1, hb, sizeof(HEARTBEAT_PAYLOAD), err_details);
 }
 
 CMD_RESULT cmd_set_flight_state(FLIGHT_STATE state, int *err_details) {
     FLIGHT_STATE_PAYLOAD payload;
-    payload.requested_state = (uint8_t)state;
+    payload.state = (uint8_t)state;
     return send_and_wait_ack(MSG_FLIGHT_STATE, &payload, sizeof(payload), err_details);
 }
+
+CMD_RESULT cmd_set_flight_mode(FLIGHT_MODE mode, int *err_details) {
+    FLIGHT_MODE_PAYLOAD payload;
+    payload.mode = (uint8_t)mode;
+    return send_and_wait_ack(MSG_FLIGHT_MODE, &payload, sizeof(payload), err_details);
+}
+
 
 CMD_RESULT cmd_arm(int *err_details) {
     return cmd_set_flight_state(FLIGHT_ARMED, err_details);
@@ -241,12 +268,6 @@ CMD_RESULT cmd_arm(int *err_details) {
 
 CMD_RESULT cmd_disarm(int *err_details) {
     return cmd_set_flight_state(FLIGHT_DISARMED, err_details);
-}
-
-CMD_RESULT cmd_set_flight_mode(FLIGHT_MODE mode, int *err_details) {
-    FLIGHT_MODE_PAYLOAD payload;
-    payload.requested_mode = (uint8_t)mode;
-    return send_and_wait_ack(MSG_FLIGHT_MODE, &payload, sizeof(payload), err_details);
 }
 
 static CMD_RESULT bootloader_cmd(BOOTLOADER_CMD cmd, uint32_t addr, uint16_t len, int *err_details) {
@@ -259,8 +280,13 @@ static CMD_RESULT bootloader_cmd(BOOTLOADER_CMD cmd, uint32_t addr, uint16_t len
     return send_and_wait_ack(MSG_BOOTLOADER_CMD, &payload, sizeof(payload), err_details);
 }
 
-CMD_RESULT cmd_bootloader_stats(int *err_details) {
-    return bootloader_cmd(BOOTLOADER_STATS, 0, 0, err_details);
+CMD_RESULT cmd_bootloader_stats(BOOTLOADER_STATS_PAYLOAD *payload, int *err_details) {
+    BOOTLOADER_CMD_PAYLOAD request;
+    memset(&request, 0, sizeof(request));
+    request.cmd = (uint8_t)BOOTLOADER_STATS;
+
+    return send_and_wait_message(MSG_BOOTLOADER_CMD, &request, sizeof(request),
+                                  MSG_BOOTLOADER_STATS, payload, sizeof(*payload), err_details);
 }
 
 CMD_RESULT cmd_bootloader_erase_app(int *err_details) {
@@ -271,7 +297,7 @@ CMD_RESULT cmd_bootloader_verify(int *err_details) {
     return bootloader_cmd(BOOTLOADER_VERIFY, 0, 0, err_details);
 }
 
-CMD_RESULT cmd_bootloader_update(uint8_t *data, size_t data_size, int *err_details) {
+CMD_RESULT cmd_bootloader_update(uint8_t *data, uint16_t data_size, int *err_details) {
     if (data == NULL || data_size == 0) {
         if (err_details) *err_details = TRANSPORT_ERR_INVALID_ARGS;
         return CMD_ERR_TRANSPORT;
@@ -282,7 +308,7 @@ CMD_RESULT cmd_bootloader_update(uint8_t *data, size_t data_size, int *err_detai
     }
 
     /* Tell the FC an update is starting and how big it'll be. */
-    CMD_RESULT rc = bootloader_cmd(BOOTLOADER_UPDATE, 0, (uint16_t)data_size, err_details);
+    CMD_RESULT rc = bootloader_cmd(BOOTLOADER_UPDATE, 0, data_size, err_details);
     if (rc != CMD_OK) {
         return rc;
     }
@@ -325,60 +351,28 @@ CMD_RESULT cmd_bootloader_update(uint8_t *data, size_t data_size, int *err_detai
 
 CMD_RESULT cmd_wait_imu_telem(IMU *imu, int *err_details) {
     TELEM_IMU_PAYLOAD payload;
-    CMD_RESULT rc = wait_for_message(MSG_TELEM_IMU, &payload, sizeof(payload), err_details);
+    CMD_RESULT rc = wait_for_message(MSG_TELEM_IMU, -1, &payload, sizeof(payload), err_details);
     if (rc == CMD_OK) *imu = payload.imu;
-    return rc;
-}
-
-CMD_RESULT cmd_wait_gps_telem(GPS *gps, int *err_details) {
-    TELEM_GPS_PAYLOAD payload;
-    CMD_RESULT rc = wait_for_message(MSG_TELEM_GPS, &payload, sizeof(payload), err_details);
-    if (rc == CMD_OK) *gps = payload.gps;
     return rc;
 }
 
 CMD_RESULT cmd_wait_barometer_telem(BAROMETER *barometer, int *err_details) {
     TELEM_BAROMETER_PAYLOAD payload;
-    CMD_RESULT rc = wait_for_message(MSG_TELEM_BAROMETER, &payload, sizeof(payload), err_details);
+    CMD_RESULT rc = wait_for_message(MSG_TELEM_BAROMETER, -1, &payload, sizeof(payload), err_details);
     if (rc == CMD_OK) *barometer = payload.barometer;
     return rc;
 }
 
 CMD_RESULT cmd_wait_power_telem(POWER *power, int *err_details) {
     TELEM_POWER_PAYLOAD payload;
-    CMD_RESULT rc = wait_for_message(MSG_TELEM_POWER, &payload, sizeof(payload), err_details);
+    CMD_RESULT rc = wait_for_message(MSG_TELEM_POWER, -1, &payload, sizeof(payload), err_details);
     if (rc == CMD_OK) *power = payload.power;
     return rc;
 }
 
 CMD_RESULT cmd_esp32_status(ESP32_STATUS_PAYLOAD *status, int *err_details) {
-    uint8_t sequence = g_next_sequence++;
-
-    CMD_RESULT rc = send_frame(MSG_ESP32_STATUS, sequence, 0, NULL, err_details);
-    if (rc != CMD_OK) {
-        return rc;
-    }
-
-    for (int attempt = 0; attempt < WAIT_MAX_ATTEMPTS; attempt++) {
-        uint8_t msg_id, seq, payload_len;
-        uint8_t payload[PAYLOAD_MAX_SIZE];
-
-        rc = recv_frame(&msg_id, &seq, payload, &payload_len, err_details);
-        if (rc == CMD_ERR_TRANSPORT) return rc;
-        if (rc == CMD_ERR_NO_RESPONSE) continue;
-
-        if (msg_id == MSG_ESP32_STATUS && seq == sequence) {
-            if (payload_len != sizeof(*status)) {
-                if (err_details) *err_details = PROTO_ERR_PAYLOAD_OVERSIZE;
-                return CMD_ERR_TRANSPORT;
-            }
-            memcpy(status, payload, sizeof(*status));
-            return CMD_OK;
-        }
-    }
-
-    if (err_details) *err_details = TRANSPORT_ERR_TIMEOUT;
-    return CMD_ERR_NO_RESPONSE;
+    return send_and_wait_message(MSG_ESP32_STATUS, NULL, 0, MSG_ESP32_STATUS,
+                                  status, sizeof(*status), err_details);
 }
 
 CMD_RESULT cmd_esp32_oled_print(char *msg, size_t msg_len, int *err_details) {
@@ -392,8 +386,7 @@ CMD_RESULT cmd_esp32_oled_print(char *msg, size_t msg_len, int *err_details) {
     }
     memcpy(payload.text, msg, copy_len);
 
-    uint8_t sequence = g_next_sequence++;
-    return send_frame(MSG_OLED, sequence, sizeof(payload), &payload, err_details);
+    return send_and_wait_ack(MSG_OLED, &payload, sizeof(payload), err_details);
 }
 
 CMD_RESULT cmd_esp32_oled_clear(int *err_details) {
@@ -401,8 +394,7 @@ CMD_RESULT cmd_esp32_oled_clear(int *err_details) {
     memset(&payload, 0, sizeof(payload));
     payload.cmd = OLED_CLEAR;
 
-    uint8_t sequence = g_next_sequence++;
-    return send_frame(MSG_OLED, sequence, sizeof(payload), &payload, err_details);
+    return send_and_wait_ack(MSG_OLED, &payload, sizeof(payload), err_details);
 }
 
 CMD_RESULT cmd_watch_imu(IMU *imu, int *err_details) {
@@ -421,21 +413,6 @@ CMD_RESULT cmd_watch_imu(IMU *imu, int *err_details) {
     return CMD_OK;
 }
 
-CMD_RESULT cmd_watch_gps(GPS *gps, int *err_details) {
-    g_watch_stop = 0;
-    while (!g_watch_stop) {
-        CMD_RESULT rc = cmd_wait_gps_telem(gps, err_details);
-        if (rc == CMD_ERR_TRANSPORT) return rc;
-        if (rc == CMD_OK) {
-            printf("[GPS] lat=%d lon=%d alt_sea=%.2f alt_gnd=%.2f fix=%d\n",
-                   gps->latitude, gps->longitude,
-                   gps->altitude_meters_abv_sealvl, gps->altitude_meters_abv_ground,
-                   gps->fix_type);
-        }
-    }
-    return CMD_OK;
-}
-
 CMD_RESULT cmd_watch_barometer(BAROMETER *barometer, int *err_details) {
     g_watch_stop = 0;
     while (!g_watch_stop) {
@@ -443,7 +420,7 @@ CMD_RESULT cmd_watch_barometer(BAROMETER *barometer, int *err_details) {
         if (rc == CMD_ERR_TRANSPORT) return rc;
         if (rc == CMD_OK) {
             printf("[BARO] pressure=%.2f Pa temp=%.2f C alt=%.2f m\n",
-                   barometer->pressure_pa, barometer->temp_c, barometer->alt_m);
+                   barometer->pressure_pascal, barometer->temperature_celsius, barometer->altitude_meters);
         }
     }
     return CMD_OK;
@@ -456,7 +433,7 @@ CMD_RESULT cmd_watch_power(POWER *power, int *err_details) {
         if (rc == CMD_ERR_TRANSPORT) return rc;
         if (rc == CMD_OK) {
             printf("[POWER] %.2fV %.2fA %.1fmAh %u%%\n",
-                   power->voltage, power->current, power->consumed_mah, power->percent);
+                   power->voltage_volts, power->current_amps, power->consumed_milliamp_hours, power->percent);
         }
     }
     return CMD_OK;
@@ -488,16 +465,10 @@ CMD_RESULT cmd_watch_overall(int *err_details) {
                        t.imu.acceleration.x, t.imu.acceleration.y, t.imu.acceleration.z);
                 break;
             }
-            case MSG_TELEM_GPS: {
-                TELEM_GPS_PAYLOAD t;
-                memcpy(&t, payload, sizeof(t));
-                printf("[GPS] lat=%d lon=%d\n", t.gps.latitude, t.gps.longitude);
-                break;
-            }
             case MSG_TELEM_BAROMETER: {
                 TELEM_BAROMETER_PAYLOAD t;
                 memcpy(&t, payload, sizeof(t));
-                printf("[BARO] alt=%.2f m\n", t.barometer.alt_m);
+                printf("[BARO] alt=%.2f m\n", t.barometer.altitude_meters);
                 break;
             }
             case MSG_TELEM_POWER: {
