@@ -7,6 +7,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <sys/wait.h>
 #include <unistd.h>
 
 static void print_error(const char *context, CMD_RESULT rc, int err)
@@ -102,6 +103,9 @@ static void usage(const char *prog)
         "  bl-stats             Bootloader info\n"
         "  bl-erase             Erase application flash\n"
         "  bl-update <file>     Upload firmware image\n"
+        "  bl-update-signed <version> <file>\n"
+        "                       Sign (via sign_firmware, using\n"
+        "                       BUFFALO_SIGNING_KEY) and upload\n"
         "  bl-verify            Verify application\n"
         "  oled-print <message> Set textual output on oled\n"
         "  oled-clear           Clear oled\n",
@@ -255,6 +259,82 @@ static CMD_RESULT h_bl_update(int argc, char **argv, int *err) {
     return rc;
 }
 
+static int run_sign_firmware(const char *version, const char *app_path,
+                              const char *out_path) {
+    const char *bin = getenv("SIGN_FIRMWARE_BIN");
+    if (!bin) {
+        bin = "sign_firmware";
+    }
+
+    pid_t pid = fork();
+    if (pid < 0) {
+        fprintf(stderr, "Error: fork failed: %s\n", strerror(errno));
+        return -1;
+    }
+
+    if (pid == 0) {
+        execlp(bin, bin, "sign", version, app_path, out_path, (char *)NULL);
+        fprintf(stderr, "Error: could not exec '%s': %s\n", bin, strerror(errno));
+        _exit(127);
+    }
+
+    int status = 0;
+    if (waitpid(pid, &status, 0) < 0) {
+        fprintf(stderr, "Error: waitpid failed: %s\n", strerror(errno));
+        return -1;
+    }
+
+    if (!WIFEXITED(status) || WEXITSTATUS(status) != 0) {
+        fprintf(stderr, "Error: sign_firmware failed\n");
+        return -1;
+    }
+
+    return 0;
+}
+
+static CMD_RESULT h_bl_update_signed(int argc, char **argv, int *err) {
+    if (argc < 2) {
+        fprintf(stderr,
+                "Error: bl-update-signed requires <version> <app.bin>\n");
+        *err = TRANSPORT_ERR_INVALID_ARGS;
+        return CMD_ERR_TRANSPORT;
+    }
+
+    if (getenv("BUFFALO_SIGNING_KEY") == NULL) {
+        fprintf(stderr, "Error: BUFFALO_SIGNING_KEY is not set\n");
+        *err = TRANSPORT_ERR_INVALID_ARGS;
+        return CMD_ERR_TRANSPORT;
+    }
+
+    char tmp_path[] = "/tmp/dragonfly_signed_XXXXXX";
+    int tmp_fd = mkstemp(tmp_path);
+    if (tmp_fd < 0) {
+        fprintf(stderr, "Error: could not create temp file: %s\n", strerror(errno));
+        *err = TRANSPORT_ERR_INVALID_ARGS;
+        return CMD_ERR_TRANSPORT;
+    }
+    close(tmp_fd);
+
+    if (run_sign_firmware(argv[0], argv[1], tmp_path) != 0) {
+        unlink(tmp_path);
+        *err = TRANSPORT_ERR_INVALID_ARGS;
+        return CMD_ERR_TRANSPORT;
+    }
+
+    long size = 0;
+    uint8_t *data = read_file(tmp_path, &size);
+    unlink(tmp_path);
+    if (!data) {
+        *err = TRANSPORT_ERR_INVALID_ARGS;
+        return CMD_ERR_TRANSPORT;
+    }
+
+    printf("Uploading %ld signed bytes...\n", size);
+    CMD_RESULT rc = cmd_bootloader_update(data, (size_t)size, err);
+    free(data);
+    return rc;
+}
+
 static CMD_RESULT h_oled_print(int argc, char **argv, int *err) {
     if (argc < 1) {
         fprintf(stderr, "Error: oled-print requires a message argument\n");
@@ -286,6 +366,7 @@ static const struct {
     {"bl-stats",    h_bl_stats},
     {"bl-erase",    h_bl_erase},
     {"bl-update",   h_bl_update},
+    {"bl-update-signed", h_bl_update_signed},
     {"bl-verify",   h_bl_verify},
     {"oled-print",  h_oled_print},
     {"oled-clear",  h_oled_clear},
