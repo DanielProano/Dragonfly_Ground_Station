@@ -135,12 +135,12 @@ static CMD_RESULT h_mode(int argc, char **argv, int *err) {
         *err = TRANSPORT_ERR_INVALID_ARGS;
         return CMD_ERR_TRANSPORT;
     }
-    return cmd_set_flight_mode((FLIGHT_MODE)atoi(argv[0]), err);
+    return cmd_set_flight_mode((flight_mode)atoi(argv[0]), err);
 }
 
 static CMD_RESULT h_status(int argc, char **argv, int *err) {
     (void)argc; (void)argv;
-    HEARTBEAT_PAYLOAD hb;
+    heartbeat_payload hb;
     CMD_RESULT rc = cmd_wait_heartbeat(&hb, err);
     if (rc == CMD_OK) {
         printf("Heartbeat OK: state=%u mode=%u flags=0x%04x\n",
@@ -151,7 +151,7 @@ static CMD_RESULT h_status(int argc, char **argv, int *err) {
 
 static CMD_RESULT h_esp32_status(int argc, char **argv, int *err) {
     (void)argc; (void)argv;
-    ESP32_STATUS_PAYLOAD status;
+    esp32_status_payload status;
     CMD_RESULT rc = cmd_esp32_status(&status, err);
     if (rc == CMD_OK) {
         printf("[ESP32] uptime=%u ms  free_heap=%u bytes  wifi_clients=%u\n",
@@ -165,19 +165,19 @@ static CMD_RESULT h_esp32_status(int argc, char **argv, int *err) {
 
 static CMD_RESULT h_watch_imu(int argc, char **argv, int *err) {
     (void)argc; (void)argv;
-    IMU imu;
+    imu imu;
     return cmd_watch_imu(&imu, err);
 }
 
 static CMD_RESULT h_watch_baro(int argc, char **argv, int *err) {
     (void)argc; (void)argv;
-    BAROMETER baro;
+    barometer baro;
     return cmd_watch_barometer(&baro, err);
 }
 
 static CMD_RESULT h_watch_power(int argc, char **argv, int *err) {
     (void)argc; (void)argv;
-    POWER pwr;
+    power pwr;
     return cmd_watch_power(&pwr, err);
 }
 
@@ -188,7 +188,7 @@ static CMD_RESULT h_watch(int argc, char **argv, int *err) {
 
 static CMD_RESULT h_bl_stats(int argc, char **argv, int *err) {
     (void)argc; (void)argv;
-    BOOTLOADER_STATS_PAYLOAD stats;
+    bootloader_stats_payload stats;
     return cmd_bootloader_stats(&stats, err);
 }
 

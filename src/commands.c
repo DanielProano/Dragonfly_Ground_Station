@@ -40,7 +40,7 @@ static CMD_RESULT send_frame(
         return CMD_ERR_TRANSPORT;
     }
 
-    FRAME frame = {
+    frame frame = {
         .start_byte  = PROTOCOL_START_BYTE,
         .version     = PROTOCOL_VERSION,
         .message_id  = message_id,
@@ -96,7 +96,7 @@ static CMD_RESULT recv_frame(
         return (rc == TRANSPORT_ERR_TIMEOUT) ? CMD_ERR_NO_RESPONSE : CMD_ERR_TRANSPORT;
     }
 
-    FRAME frame;
+    frame frame;
     if (protocol_frame_decode(&frame, buf, 5 + remaining) < 0) {
         if (err_details) *err_details = ERROR_CRC_FAIL;
         return CMD_ERR_TRANSPORT;
@@ -127,7 +127,7 @@ static CMD_RESULT wait_for_ack(uint8_t sequence, int *err_details) {
         if (rc == CMD_ERR_NO_RESPONSE) continue;
 
         if (msg_id == MSG_ACK) {
-            ACK_PAYLOAD ack;
+            ack_payload ack;
             memcpy(&ack, payload, sizeof(ack));
             if (ack.ack_seq == sequence) {
                 return CMD_OK;
@@ -136,7 +136,7 @@ static CMD_RESULT wait_for_ack(uint8_t sequence, int *err_details) {
         }
 
         if (msg_id == MSG_NACK) {
-            NACK_PAYLOAD nack;
+            nack_payload nack;
             memcpy(&nack, payload, sizeof(nack));
             if (nack.nacked_seq == sequence) {
                 if (err_details) *err_details = nack.error;
@@ -177,7 +177,7 @@ static CMD_RESULT wait_for_message(
         }
 
         if (msg_id == MSG_NACK) {
-            NACK_PAYLOAD nack;
+            nack_payload nack;
             memcpy(&nack, payload, sizeof(nack));
             if (err_details) *err_details = nack.error;
             return CMD_ERR_NACKED;
@@ -226,7 +226,7 @@ static CMD_RESULT send_and_wait_message(
 }
 
 CMD_RESULT cmd_init(const char *host, uint16_t port, int *err_details) {
-    compute_crc16_table();
+    protocol_frame_init();
 
     int rc = transport_connect(&g_transport, host, port);
     if (rc != TRANSPORT_OK) {
@@ -245,18 +245,18 @@ CMD_RESULT cmd_init(const char *host, uint16_t port, int *err_details) {
     return CMD_OK;
 }
 
-CMD_RESULT cmd_wait_heartbeat(HEARTBEAT_PAYLOAD *hb, int *err_details) {
-    return wait_for_message(MSG_HEARTBEAT, -1, hb, sizeof(HEARTBEAT_PAYLOAD), err_details);
+CMD_RESULT cmd_wait_heartbeat(heartbeat_payload *hb, int *err_details) {
+    return wait_for_message(MSG_HEARTBEAT, -1, hb, sizeof(heartbeat_payload), err_details);
 }
 
-CMD_RESULT cmd_set_flight_state(FLIGHT_STATE state, int *err_details) {
-    FLIGHT_STATE_PAYLOAD payload;
+CMD_RESULT cmd_set_flight_state(flight_state state, int *err_details) {
+    flight_state_payload payload;
     payload.state = (uint8_t)state;
     return send_and_wait_ack(MSG_FLIGHT_STATE, &payload, sizeof(payload), err_details);
 }
 
-CMD_RESULT cmd_set_flight_mode(FLIGHT_MODE mode, int *err_details) {
-    FLIGHT_MODE_PAYLOAD payload;
+CMD_RESULT cmd_set_flight_mode(flight_mode mode, int *err_details) {
+    flight_mode_payload payload;
     payload.mode = (uint8_t)mode;
     return send_and_wait_ack(MSG_FLIGHT_MODE, &payload, sizeof(payload), err_details);
 }
@@ -270,8 +270,8 @@ CMD_RESULT cmd_disarm(int *err_details) {
     return cmd_set_flight_state(FLIGHT_DISARMED, err_details);
 }
 
-static CMD_RESULT bootloader_cmd(BOOTLOADER_CMD cmd, uint32_t addr, uint16_t len, int *err_details) {
-    BOOTLOADER_CMD_PAYLOAD payload;
+static CMD_RESULT send_bootloader_cmd(bootloader_cmd cmd, uint32_t addr, uint16_t len, int *err_details) {
+    bootloader_cmd_payload payload;
     memset(&payload, 0, sizeof(payload));
     payload.addr = addr;
     payload.len = len;
@@ -280,21 +280,18 @@ static CMD_RESULT bootloader_cmd(BOOTLOADER_CMD cmd, uint32_t addr, uint16_t len
     return send_and_wait_ack(MSG_BOOTLOADER_CMD, &payload, sizeof(payload), err_details);
 }
 
-CMD_RESULT cmd_bootloader_stats(BOOTLOADER_STATS_PAYLOAD *payload, int *err_details) {
-    BOOTLOADER_CMD_PAYLOAD request;
-    memset(&request, 0, sizeof(request));
-    request.cmd = (uint8_t)BOOTLOADER_STATS;
-
-    return send_and_wait_message(MSG_BOOTLOADER_CMD, &request, sizeof(request),
-                                  MSG_BOOTLOADER_STATS, payload, sizeof(*payload), err_details);
+CMD_RESULT cmd_bootloader_stats(bootloader_stats_payload *payload, int *err_details) {
+    (void)payload;
+    if (err_details) *err_details = ERROR_UNKNOWN_MSG;
+    return CMD_ERR_TRANSPORT;
 }
 
 CMD_RESULT cmd_bootloader_erase_app(int *err_details) {
-    return bootloader_cmd(BOOTLOADER_ERASE_APP, 0, 0, err_details);
+    return send_bootloader_cmd(BOOTLOADER_ERASE_APP, 0, 0, err_details);
 }
 
 CMD_RESULT cmd_bootloader_verify(int *err_details) {
-    return bootloader_cmd(BOOTLOADER_VERIFY, 0, 0, err_details);
+    return send_bootloader_cmd(BOOTLOADER_VERIFY, 0, 0, err_details);
 }
 
 CMD_RESULT cmd_bootloader_update(uint8_t *data, uint16_t data_size, int *err_details) {
@@ -308,7 +305,7 @@ CMD_RESULT cmd_bootloader_update(uint8_t *data, uint16_t data_size, int *err_det
     }
 
     /* Tell the FC an update is starting and how big it'll be. */
-    CMD_RESULT rc = bootloader_cmd(BOOTLOADER_UPDATE, 0, data_size, err_details);
+    CMD_RESULT rc = send_bootloader_cmd(BOOTLOADER_UPDATE, 0, data_size, err_details);
     if (rc != CMD_OK) {
         return rc;
     }
@@ -316,11 +313,11 @@ CMD_RESULT cmd_bootloader_update(uint8_t *data, uint16_t data_size, int *err_det
     size_t offset = 0;
     while (offset < data_size) {
         size_t chunk_len = data_size - offset;
-        if (chunk_len > sizeof(((BOOTLOADER_DATA_PAYLOAD *)0)->data)) {
-            chunk_len = sizeof(((BOOTLOADER_DATA_PAYLOAD *)0)->data);
+        if (chunk_len > sizeof(((bootloader_data_payload *)0)->data)) {
+            chunk_len = sizeof(((bootloader_data_payload *)0)->data);
         }
 
-        BOOTLOADER_DATA_PAYLOAD payload;
+        bootloader_data_payload payload;
         memset(&payload, 0, sizeof(payload));
         payload.addr = (uint32_t)offset;
         memcpy(payload.data, data + offset, chunk_len);
@@ -349,34 +346,34 @@ CMD_RESULT cmd_bootloader_update(uint8_t *data, uint16_t data_size, int *err_det
     return CMD_OK;
 }
 
-CMD_RESULT cmd_wait_imu_telem(IMU *imu, int *err_details) {
-    TELEM_IMU_PAYLOAD payload;
+CMD_RESULT cmd_wait_imu_telem(imu *imu, int *err_details) {
+    telem_imu_payload payload;
     CMD_RESULT rc = wait_for_message(MSG_TELEM_IMU, -1, &payload, sizeof(payload), err_details);
     if (rc == CMD_OK) *imu = payload.imu;
     return rc;
 }
 
-CMD_RESULT cmd_wait_barometer_telem(BAROMETER *barometer, int *err_details) {
-    TELEM_BAROMETER_PAYLOAD payload;
+CMD_RESULT cmd_wait_barometer_telem(barometer *barometer, int *err_details) {
+    telem_barometer_payload payload;
     CMD_RESULT rc = wait_for_message(MSG_TELEM_BAROMETER, -1, &payload, sizeof(payload), err_details);
     if (rc == CMD_OK) *barometer = payload.barometer;
     return rc;
 }
 
-CMD_RESULT cmd_wait_power_telem(POWER *power, int *err_details) {
-    TELEM_POWER_PAYLOAD payload;
+CMD_RESULT cmd_wait_power_telem(power *power, int *err_details) {
+    telem_power_payload payload;
     CMD_RESULT rc = wait_for_message(MSG_TELEM_POWER, -1, &payload, sizeof(payload), err_details);
     if (rc == CMD_OK) *power = payload.power;
     return rc;
 }
 
-CMD_RESULT cmd_esp32_status(ESP32_STATUS_PAYLOAD *status, int *err_details) {
+CMD_RESULT cmd_esp32_status(esp32_status_payload *status, int *err_details) {
     return send_and_wait_message(MSG_ESP32_STATUS, NULL, 0, MSG_ESP32_STATUS,
                                   status, sizeof(*status), err_details);
 }
 
 CMD_RESULT cmd_esp32_oled_print(char *msg, size_t msg_len, int *err_details) {
-    OLED_PAYLOAD payload;
+    oled_payload payload;
     memset(&payload, 0, sizeof(payload));
     payload.cmd = OLED_PRINT;
 
@@ -390,14 +387,14 @@ CMD_RESULT cmd_esp32_oled_print(char *msg, size_t msg_len, int *err_details) {
 }
 
 CMD_RESULT cmd_esp32_oled_clear(int *err_details) {
-    OLED_PAYLOAD payload;
+    oled_payload payload;
     memset(&payload, 0, sizeof(payload));
     payload.cmd = OLED_CLEAR;
 
     return send_and_wait_ack(MSG_OLED, &payload, sizeof(payload), err_details);
 }
 
-CMD_RESULT cmd_watch_imu(IMU *imu, int *err_details) {
+CMD_RESULT cmd_watch_imu(imu *imu, int *err_details) {
     g_watch_stop = 0;
     while (!g_watch_stop) {
         CMD_RESULT rc = cmd_wait_imu_telem(imu, err_details);
@@ -413,7 +410,7 @@ CMD_RESULT cmd_watch_imu(IMU *imu, int *err_details) {
     return CMD_OK;
 }
 
-CMD_RESULT cmd_watch_barometer(BAROMETER *barometer, int *err_details) {
+CMD_RESULT cmd_watch_barometer(barometer *barometer, int *err_details) {
     g_watch_stop = 0;
     while (!g_watch_stop) {
         CMD_RESULT rc = cmd_wait_barometer_telem(barometer, err_details);
@@ -426,7 +423,7 @@ CMD_RESULT cmd_watch_barometer(BAROMETER *barometer, int *err_details) {
     return CMD_OK;
 }
 
-CMD_RESULT cmd_watch_power(POWER *power, int *err_details) {
+CMD_RESULT cmd_watch_power(power *power, int *err_details) {
     g_watch_stop = 0;
     while (!g_watch_stop) {
         CMD_RESULT rc = cmd_wait_power_telem(power, err_details);
@@ -452,27 +449,27 @@ CMD_RESULT cmd_watch_overall(int *err_details) {
 
         switch (msg_id) {
             case MSG_HEARTBEAT: {
-                HEARTBEAT_PAYLOAD hb;
+                heartbeat_payload hb;
                 memcpy(&hb, payload, sizeof(hb));
                 printf("[HEARTBEAT] state=%u mode=%u flags=0x%04x\n",
                        hb.state, hb.mode, hb.error_flags);
                 break;
             }
             case MSG_TELEM_IMU: {
-                TELEM_IMU_PAYLOAD t;
+                telem_imu_payload t;
                 memcpy(&t, payload, sizeof(t));
                 printf("[IMU] accel=(%.2f, %.2f, %.2f)\n",
                        t.imu.acceleration.x, t.imu.acceleration.y, t.imu.acceleration.z);
                 break;
             }
             case MSG_TELEM_BAROMETER: {
-                TELEM_BAROMETER_PAYLOAD t;
+                telem_barometer_payload t;
                 memcpy(&t, payload, sizeof(t));
                 printf("[BARO] alt=%.2f m\n", t.barometer.altitude_meters);
                 break;
             }
             case MSG_TELEM_POWER: {
-                TELEM_POWER_PAYLOAD t;
+                telem_power_payload t;
                 memcpy(&t, payload, sizeof(t));
                 printf("[POWER] %u%%\n", t.power.percent);
                 break;
