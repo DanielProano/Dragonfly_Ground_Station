@@ -27,6 +27,8 @@ CMD_RESULT cmd_wait_power_telem(power *power, int *err_details);
 CMD_RESULT cmd_esp32_status(esp32_status_payload *status, int *err_details);
 CMD_RESULT cmd_esp32_oled_print(char *msg, size_t msg_len, int *err_details);
 CMD_RESULT cmd_esp32_oled_clear(int *err_details);
+CMD_RESULT cmd_motor_throttle(const uint8_t percent[4], int *err_details);
+CMD_RESULT cmd_run_motors(const uint8_t percent[4], int *err_details);
 
 CMD_RESULT cmd_watch_imu(imu *imu, int *err_details);
 CMD_RESULT cmd_watch_barometer(barometer *barometer, int *err_details);

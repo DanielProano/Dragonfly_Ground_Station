@@ -9,10 +9,12 @@
 #include <signal.h>
 #include <stdio.h>
 #include <string.h>
+#include <unistd.h>
 
 #define WAIT_MAX_ATTEMPTS 5
 #define BOOTLOADER_CHUNK_MAX_RETRIES 3
 #define WIRE_BUF_MAX (5 + PAYLOAD_MAX_SIZE + 2)
+#define MOTOR_RESEND_INTERVAL_US 100000
 
 static TRANSPORT g_transport;
 static uint8_t g_next_sequence = 0;
@@ -392,6 +394,32 @@ CMD_RESULT cmd_esp32_oled_clear(int *err_details) {
     payload.cmd = OLED_CLEAR;
 
     return send_and_wait_ack(MSG_OLED, &payload, sizeof(payload), err_details);
+}
+
+CMD_RESULT cmd_motor_throttle(const uint8_t percent[4], int *err_details) {
+    motor_throttle_payload payload;
+    memcpy(payload.percent, percent, sizeof(payload.percent));
+
+    return send_and_wait_ack(MSG_MOTOR_THROTTLE, &payload, sizeof(payload), err_details);
+}
+
+CMD_RESULT cmd_run_motors(const uint8_t percent[4], int *err_details) {
+    static const uint8_t stopped[4] = {0, 0, 0, 0};
+    CMD_RESULT rc = CMD_OK;
+
+    g_watch_stop = 0;
+    while (!g_watch_stop) {
+        rc = cmd_motor_throttle(percent, err_details);
+        if (rc != CMD_OK) {
+            break;
+        }
+        usleep(MOTOR_RESEND_INTERVAL_US);
+    }
+
+    int stop_err = 0;
+    cmd_motor_throttle(stopped, &stop_err);
+
+    return rc;
 }
 
 CMD_RESULT cmd_watch_imu(imu *imu, int *err_details) {

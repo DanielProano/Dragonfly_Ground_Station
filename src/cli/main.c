@@ -108,7 +108,10 @@ static void usage(const char *prog)
         "                       BUFFALO_SIGNING_KEY) and upload\n"
         "  bl-verify            Verify application\n"
         "  oled-print <message> Set textual output on oled\n"
-        "  oled-clear           Clear oled\n",
+        "  oled-clear           Clear oled\n"
+        "  motor <m1> <m2> <m3> <m4>\n"
+        "                       Spin motors at 0-100%% each (capped on the\n"
+        "                       drone) until Ctrl+C, then stop\n",
         prog);
 }
 
@@ -350,6 +353,30 @@ static CMD_RESULT h_oled_clear(int argc, char **argv, int *err) {
     return cmd_esp32_oled_clear(err);
 };
 
+static CMD_RESULT h_motor(int argc, char **argv, int *err) {
+    if (argc < 4) {
+        fprintf(stderr, "Error: motor requires 4 throttle percentages\n");
+        *err = TRANSPORT_ERR_INVALID_ARGS;
+        return CMD_ERR_TRANSPORT;
+    }
+
+    uint8_t percent[4];
+    for (int i = 0; i < 4; i++) {
+        char *end = NULL;
+        long value = strtol(argv[i], &end, 10);
+        if (end == argv[i] || *end != '\0' || value < 0 || value > 100) {
+            fprintf(stderr, "Error: motor throttle '%s' must be 0-100\n", argv[i]);
+            *err = TRANSPORT_ERR_INVALID_ARGS;
+            return CMD_ERR_TRANSPORT;
+        }
+        percent[i] = (uint8_t)value;
+    }
+
+    printf("Motors at %u %u %u %u%% (Ctrl+C to stop)\n",
+           percent[0], percent[1], percent[2], percent[3]);
+    return cmd_run_motors(percent, err);
+}
+
 static const struct {
     const char *name;
     CmdHandler handler;
@@ -370,6 +397,7 @@ static const struct {
     {"bl-verify",   h_bl_verify},
     {"oled-print",  h_oled_print},
     {"oled-clear",  h_oled_clear},
+    {"motor",       h_motor},
 };
 
 static CmdHandler find_handler(const char *name) {
